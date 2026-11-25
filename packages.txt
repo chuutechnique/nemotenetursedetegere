@@ -56,7 +56,8 @@ libtext-charwidth-perl
 network-manager-openvpn
 bubblewrap
 slirp4netns
-xserver-xephyr
+xvfb
+x11-utils
 iptables
 pulseaudio-utils
 nmap

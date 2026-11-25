@@ -1,4 +1,3 @@
 xsetroot -solid black
 /usr/local/bin/tor-live-session &
 /usr/local/bin/tor-live-rede --monitor &
-/usr/local/bin/tor-live-windows &

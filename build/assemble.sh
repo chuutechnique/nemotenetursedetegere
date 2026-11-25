@@ -14,6 +14,7 @@ guest() {
 }
 
 cp -a overlay/. "$r/"
+rm -f "$r/usr/local/share/sonic-os/sandbox-openbox.xml"
 # NTFS/ZIP backups do not preserve Unix modes. Restore safe defaults for every
 # overlay file, not just executable scripts, before creating the live image.
 python3 - "$r" <<'PY'

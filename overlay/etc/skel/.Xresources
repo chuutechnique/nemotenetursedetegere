@@ -1,0 +1,6 @@
+XTerm*renderFont: true
+XTerm*faceName: DejaVu Sans Mono
+XTerm*faceSize: 11
+XTerm*geometry: 79x27
+XTerm*background: black
+XTerm*foreground: white

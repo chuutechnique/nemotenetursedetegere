@@ -1,0 +1,11 @@
+--- a/openbox/screen.c
++++ b/openbox/screen.c
+@@ -512,6 +512,8 @@
+     gulong *viewport;
+     GList *it, *stacking_copy;
+ 
++    num = 1;
++
+     g_assert(num > 0);
+ 
+     if (screen_num_desktops == num) return;

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Trusted launcher inside the application namespace, with private audio/WM."""
+"""Trusted launcher inside the application namespace, with private audio."""
 import os
 from pathlib import Path
 import signal
@@ -52,16 +52,11 @@ def main():
             if server.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError("private audio endpoints did not initialize")
             time.sleep(0.1)
-        manager = subprocess.Popen([
-            "/usr/bin/openbox", "--config-file", "/usr/local/share/sonic-os/sandbox-openbox.xml"])
-        processes.append(manager)
-        if app == "tor":
-            processes.append(subprocess.Popen(["/usr/local/bin/tor-live-windows"]))
         browser = subprocess.Popen(command)
         processes.append(browser)
         while browser.poll() is None:
-            if server.poll() is not None or manager.poll() is not None:
-                raise RuntimeError("private desktop helper stopped")
+            if server.poll() is not None:
+                raise RuntimeError("private audio helper stopped")
             time.sleep(0.25)
         return browser.returncode
     finally:
@@ -82,5 +77,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         raise SystemExit(130)
     except (OSError, RuntimeError) as error:
-        print(f"private desktop: {error}", file=sys.stderr)
+        print(f"private session: {error}", file=sys.stderr)
         raise SystemExit(1)

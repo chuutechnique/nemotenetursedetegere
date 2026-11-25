@@ -1,36 +1,68 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>nemoTeneturSeDetegere</title>
 <style>
-  html { color-scheme: dark; background: #1c1b22; color: #f5f4f8; }
-  body { max-width: 32rem; margin: 3rem auto; padding: 0 1rem; font: 1rem/1.6 system-ui, sans-serif; }
-  li { margin-block: .5rem; }
-  .version { margin-top: -.5rem; margin-bottom: 1.5rem; color: #a6a3b5; font-size: .85rem; }
-  .install-command { margin-block: 2rem 1.5rem; list-style: none; }
-  .install-command code {
-    display: inline-block;
-    padding: .6rem .85rem;
-    background: #111116;
-    border: 1px solid #464552;
-    border-radius: .4rem;
-    font: .95rem monospace;
-    overflow-wrap: anywhere;
-  }
+  html { color-scheme: dark; background: #000; color: #eee }
+  body { margin: 0; font: .9rem/1.65 monospace }
+  main { max-width: 72rem; margin: auto; padding: clamp(3rem, 6vw, 5rem) 1.5rem 2rem; box-sizing: border-box }
+  h1.ascii-title { margin: 0 auto 1.5rem; max-width: 100%; overflow-x: auto; white-space: pre; color: #ff2020; font: clamp(2px, .67vw, 10px)/1.05 monospace; width: fit-content }
+  .version { color: #aaa; font-size: .8rem; text-align: center; margin-bottom: 2rem }
+  .terminal-note, .shortcuts { box-sizing: border-box; max-width: 42rem; margin: 1.5rem auto; padding: 1rem 1.2rem; background: #090909; border: 1px solid #333; overflow-wrap: anywhere }
+  .terminal-note { border-color: #ff2020 }
+  .terminal-note p { margin: .35rem 0 }
+  .prompt, kbd { color: #ff4040 }
+  .shortcuts ul { margin: 0; padding: 0; list-style: none }
+  .shortcuts li { margin: .65rem 0 }
+  kbd, code { font: inherit }
+  .install-command { display: block; width: fit-content; margin: 1.5rem auto; padding: .6rem .85rem; border: 1px solid #555; background: #161616; color: #fff; overflow-wrap: anywhere }
+  .session-note { max-width: 42rem; margin: 1.5rem auto; color: #aaa }
+  .ascii-quote { margin: 3rem auto 1rem; max-width: 100%; overflow-x: auto; white-space: pre; color: #fff; font: clamp(1px, .42vw, 6px)/1.15 monospace; width: fit-content }
 </style>
-<h1>nemoTeneturSeDetegere</h1>
+</head>
+<body>
+<main>
+<h1 class="ascii-title" aria-label="nemoTeneturSeDetegere"><span aria-hidden="true"> ███▄    █ ▓█████  ███▄ ▄███▓ ▒█████     ▄▄▄█████▓▓█████  ███▄    █ ▓█████▄▄▄█████▓ █    ██  ██▀███       ██████ ▓█████    ▓█████▄ ▓█████▄▄▄█████▓▓█████   ▄████ ▓█████  ██▀███  ▓█████
+ ██ ▀█   █ ▓█   ▀ ▓██▒▀█▀ ██▒▒██▒  ██▒   ▓  ██▒ ▓▒▓█   ▀  ██ ▀█   █ ▓█   ▀▓  ██▒ ▓▒ ██  ▓██▒▓██ ▒ ██▒   ▒██    ▒ ▓█   ▀    ▒██▀ ██▌▓█   ▀▓  ██▒ ▓▒▓█   ▀  ██▒ ▀█▒▓█   ▀ ▓██ ▒ ██▒▓█   ▀
+▓██  ▀█ ██▒▒███   ▓██    ▓██░▒██░  ██▒   ▒ ▓██░ ▒░▒███   ▓██  ▀█ ██▒▒███  ▒ ▓██░ ▒░▓██  ▒██░▓██ ░▄█ ▒   ░ ▓██▄   ▒███      ░██   █▌▒███  ▒ ▓██░ ▒░▒███   ▒██░▄▄▄░▒███   ▓██ ░▄█ ▒▒███
+▓██▒  ▐▌██▒▒▓█  ▄ ▒██    ▒██ ▒██   ██░   ░ ▓██▓ ░ ▒▓█  ▄ ▓██▒  ▐▌██▒▒▓█  ▄░ ▓██▓ ░ ▓▓█  ░██░▒██▀▀█▄       ▒   ██▒▒▓█  ▄    ░▓█▄   ▌▒▓█  ▄░ ▓██▓ ░ ▒▓█  ▄ ░▓█  ██▓▒▓█  ▄ ▒██▀▀█▄  ▒▓█  ▄
+▒██░   ▓██░░▒████▒▒██▒   ░██▒░ ████▓▒░     ▒██▒ ░ ░▒████▒▒██░   ▓██░░▒████▒ ▒██▒ ░ ▒▒█████▓ ░██▓ ▒██▒   ▒██████▒▒░▒████▒   ░▒████▓ ░▒████▒ ▒██▒ ░ ░▒████▒░▒▓███▀▒░▒████▒░██▓ ▒██▒░▒████▒
+░ ▒░   ▒ ▒ ░░ ▒░ ░░ ▒░   ░  ░░ ▒░▒░▒░      ▒ ░░   ░░ ▒░ ░░ ▒░   ▒ ▒ ░░ ▒░ ░ ▒ ░░   ░▒▓▒ ▒ ▒ ░ ▒▓ ░▒▓░   ▒ ▒▓▒ ▒ ░░░ ▒░ ░    ▒▒▓  ▒ ░░ ▒░ ░ ▒ ░░   ░░ ▒░ ░ ░▒   ▒ ░░ ▒░ ░░ ▒▓ ░▒▓░░░ ▒░ ░
+░ ░░   ░ ▒░ ░ ░  ░░  ░      ░  ░ ▒ ▒░        ░     ░ ░  ░░ ░░   ░ ▒░ ░ ░  ░   ░    ░░▒░ ░ ░   ░▒ ░ ▒░   ░ ░▒  ░ ░ ░ ░  ░    ░ ▒  ▒  ░ ░  ░   ░     ░ ░  ░  ░   ░  ░ ░  ░  ░▒ ░ ▒░ ░ ░  ░
+   ░   ░ ░    ░   ░      ░   ░ ░ ░ ▒       ░         ░      ░   ░ ░    ░    ░       ░░░ ░ ░   ░░   ░    ░  ░  ░     ░       ░ ░  ░    ░    ░         ░   ░ ░   ░    ░     ░░   ░    ░
+         ░    ░  ░       ░       ░ ░                 ░  ░         ░    ░  ░           ░        ░              ░     ░  ░      ░       ░  ░           ░  ░      ░    ░  ░   ░        ░  ░
+                                                                                                                            ░</span></h1>
 <p class="version">v0.2-25.11.2026</p>
+<aside class="terminal-note">
+  <p><span class="prompt">&gt;</span> javascript is disabled for websites by default in tor browser, using safest mode</p>
+  <p><span class="prompt">&gt;</span> the built-in snowflake bridge is configured for tor browser</p>
+</aside>
+<section class="shortcuts" aria-label="keyboard shortcuts">
 <ul>
-  <li><kbd>super + t</kbd> — open a tor browser window</li>
-  <li><kbd>super + f</kbd> — open firefox (direct connection, outside tor)</li>
-  <li><kbd>super + q</kbd> — close the active window</li>
-  <li><kbd>super + w</kbd> — open network settings</li>
-  <li><kbd>super + k</kbd> — open input settings</li>
-  <li><kbd>super + d</kbd> — open display settings</li>
-  <li><kbd>ctrl + alt + t</kbd> — open the terminal</li>
+  <li><kbd>super + t</kbd> — open tor</li>
+  <li><kbd>super + f</kbd> — open firefox</li>
+  <li><kbd>super + q</kbd> — close app</li>
+  <li><kbd>super + m</kbd> — maximize / restore</li>
+  <li><kbd>super + up</kbd> — maximize</li>
+  <li><kbd>super + down</kbd> — restore</li>
+  <li><kbd>super + w</kbd> — network settings</li>
+  <li><kbd>super + k</kbd> — input settings</li>
+  <li><kbd>super + d</kbd> — display settings</li>
+  <li><kbd>ctrl + alt + t</kbd> — open terminal</li>
   <li><kbd>super + shift + esc</kbd> — shut down</li>
-  <li class="install-command"><code>sonic install &lt;package&gt;</code></li>
 </ul>
-<p>apps installed with sonic and their session data stay in ram and are cleared when you shut down</p>
+</section>
+<code class="install-command">sonic install &lt;package&gt;</code>
+<p class="session-note">apps installed with sonic and their session data stay in ram and are cleared when you shut down</p>
+<pre class="ascii-quote" role="img" aria-label="No one is bound to reveal themselves">   ▄   ████▄     ████▄    ▄   ▄███▄       ▄█    ▄▄▄▄▄       ███   ████▄   ▄      ▄   ██▄          ▄▄▄▄▀ ████▄     █▄▄▄▄ ▄███▄      ▄   ▄███▄   ██   █            ▄▄▄▄▀ ▄  █ ▄███▄   █▀▄▀█    ▄▄▄▄▄   ▄███▄   █       ▄   ▄███▄     ▄▄▄▄▄
+    █  █   █     █   █     █  █▀   ▀      ██   █     ▀▄     █  █  █   █    █      █  █  █      ▀▀▀ █    █   █     █  ▄▀ █▀   ▀      █  █▀   ▀  █ █  █         ▀▀▀ █   █   █ █▀   ▀  █ █ █   █     ▀▄ █▀   ▀  █        █  █▀   ▀   █     ▀▄
+██   █ █   █     █   █ ██   █ ██▄▄        ██ ▄  ▀▀▀▀▄       █ ▀ ▄ █   █ █   █ ██   █ █   █         █    █   █     █▀▀▌  ██▄▄   █     █ ██▄▄    █▄▄█ █             █   ██▀▀█ ██▄▄    █ ▄ █ ▄  ▀▀▀▀▄   ██▄▄    █   █     █ ██▄▄   ▄  ▀▀▀▀▄
+█ █  █ ▀████     ▀████ █ █  █ █▄   ▄▀     ▐█  ▀▄▄▄▄▀        █  ▄▀ ▀████ █   █ █ █  █ █  █         █     ▀████     █  █  █▄   ▄▀ █    █ █▄   ▄▀ █  █ ███▄         █    █   █ █▄   ▄▀ █   █  ▀▄▄▄▄▀    █▄   ▄▀ ███▄ █    █ █▄   ▄▀ ▀▄▄▄▄▀
+█  █ █                 █  █ █ ▀███▀        ▐                ███         █▄ ▄█ █  █ █ ███▀        ▀                  █   ▀███▀    █  █  ▀███▀      █     ▀       ▀        █  ▀███▀      █             ▀███▀       ▀ █  █  ▀███▀ ██
+█   ██                 █   ██                                            ▀▀▀  █   ██                               ▀              █▐             █                      ▀             ▀                             █▐
+                                                                                                                                  ▐             ▀                                                                   ▐</pre>
+</main>
+</body>
 </html>

@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
-  <theme><name>Nightmare</name></theme>
+  <theme><name>Nightmare</name><titleLayout>LMC</titleLayout></theme>
+  <desktops><number>1</number><firstdesk>1</firstdesk><names><name>main</name></names></desktops>
+  <placement><policy>Smart</policy><center>yes</center></placement>
   <keyboard>
+    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+    <keybind key="A-S-Tab"><action name="PreviousWindow"/></keybind>
+    <keybind key="A-F4"><action name="Close"/></keybind>
+    <keybind key="W-m"><action name="ToggleMaximize"/></keybind>
+    <keybind key="W-Up"><action name="Maximize"/></keybind>
+    <keybind key="W-Down"><action name="Unmaximize"/></keybind>
     <keybind key="W-f">
       <action name="Execute"><command>sonic-firefox --new-window about:blank</command></action>
     </keybind>
@@ -19,10 +27,40 @@
       <action name="Execute"><command>tor-live-windows new</command></action>
     </keybind>
     <keybind key="C-A-t">
-      <action name="Execute"><command>xterm -T nemo -bg black -fg white -e bash -c 'fastfetch; exec bash'</command></action>
+      <action name="Execute"><command>xterm -T nemo -fa &quot;DejaVu Sans Mono&quot; -fs 11 -geometry 79x27 -bg black -fg white -e bash -c 'fastfetch; exec bash'</command></action>
     </keybind>
     <keybind key="W-w">
       <action name="Execute"><command>tor-live-rede</command></action>
     </keybind>
   </keyboard>
+  <mouse>
+    <dragThreshold>3</dragThreshold>
+    <doubleClickTime>400</doubleClickTime>
+    <context name="Frame">
+      <mousebind button="A-Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="A-Left" action="Drag"><action name="Move"/></mousebind>
+      <mousebind button="A-Right" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="A-Right" action="Drag"><action name="Resize"/></mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+    </context>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
+      <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
+    </context>
+    <context name="Maximize">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Click"><action name="ToggleMaximize"/></mousebind>
+    </context>
+    <context name="Close">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Click"><action name="Close"/></mousebind>
+    </context>
+    <context name="Top Left Right Bottom TLCorner TRCorner BLCorner BRCorner">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Drag"><action name="Resize"/></mousebind>
+    </context>
+  </mouse>
 </openbox_config>

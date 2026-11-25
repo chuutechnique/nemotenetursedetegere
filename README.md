@@ -92,9 +92,21 @@ use these tools on systems and networks you administer or have permission to tes
 
 ## isolation
 
-the tor browser, firefox and discord launchers create a dedicated xephyr display and separate filesystem, process, ipc and network namespaces using bubblewrap and slirp4netns
+the tor browser, firefox and discord launchers create independent instances with private xvfb displays, separate filesystem, process, ipc and network namespaces, and native desktop windows forwarded through xpra
+
+there is no nested desktop and windows are not automatically tiled
+
+windows can be moved, resized, maximized and restored independently
+
+minimizing is disabled and closing a desktop application window terminates its instance
+
+the desktop has one workspace, and the window manager does not allow additional workspaces
 
 the desktop home directory, desktop d-bus and main display socket are not exposed to these applications
+
+xpra clipboard, automatic file transfers, url opening, printing, device forwarding, remote command execution and network listeners are disabled
+
+only a private local socket is used for the window bridge
 
 each application keeps its own files in ram
 
@@ -102,7 +114,15 @@ the shared exchange folder inside the home directory is accessible to the applic
 
 copying, pasting and dragging files freely between isolated displays is restricted
 
-all tor windows use one tor browser session with shared cookies and logins, so they are not independent identities
+each launch creates a separate tor browser process, profile, cookies and tor session
+
+closing one independently launched instance does not close another
+
+each additional browser instance uses additional ram
+
+tor browser starts at its safest security level, disabling javascript for websites by default, with the official built-in snowflake bridge configured
+
+bridge availability depends on the network, and it can be changed in tor browser connection settings
 
 super+t always activates the tor launcher, including when direct firefox is open
 
@@ -116,7 +136,7 @@ openvpn, tailscale, the installer and network settings remain trusted session ma
 
 this model does not provide a separate virtual machine for each application
 
-the kernel, graphics drivers, xephyr, audio and network brokers and desktop remain shared trusted components
+the kernel, graphics drivers, xpra, xvfb, audio and network brokers and desktop remain shared trusted components
 
 gpu access remains available for compatibility
 
@@ -153,6 +173,8 @@ the debian base download verifies the amd64 manifest hash and downloaded layer h
 tor browser is verified through its signature
 
 the initial nvidia repository key is retrieved through https without an independently pinned hash in this project
+
+the window bridge uses signed packages from the official xpra repository, with its signing key fingerprint pinned in the build script
 
 packages and browsers can change between builds, so the same version number does not imply an identical image
 
