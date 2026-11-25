@@ -11,13 +11,12 @@
   h1.ascii-title { margin: 0 auto 1.5rem; max-width: 100%; overflow-x: auto; white-space: pre; color: #ff2020; font: clamp(2px, .67vw, 10px)/1.05 monospace; width: fit-content }
   .version { color: #aaa; font-size: .8rem; text-align: center; margin-bottom: 2rem }
   .terminal-note, .shortcuts { box-sizing: border-box; max-width: 42rem; margin: 1.5rem auto; padding: 1rem 1.2rem; background: #090909; border: 1px solid #333; overflow-wrap: anywhere }
-  .terminal-note { border-color: #ff2020 }
   .terminal-note p { margin: .35rem 0 }
   .prompt, kbd { color: #ff4040 }
   .shortcuts ul { margin: 0; padding: 0; list-style: none }
   .shortcuts li { margin: .65rem 0 }
   kbd, code { font: inherit }
-  .install-command { display: block; width: fit-content; margin: 1.5rem auto; padding: .6rem .85rem; border: 1px solid #555; background: #161616; color: #fff; overflow-wrap: anywhere }
+  .install-command { margin: 0; color: #fff }
   .session-note { max-width: 42rem; margin: 1.5rem auto; color: #aaa }
   .ascii-quote { margin: 3rem auto 1rem; max-width: 100%; overflow-x: auto; white-space: pre; color: #fff; font: clamp(1px, .42vw, 6px)/1.15 monospace; width: fit-content }
 </style>
@@ -43,7 +42,7 @@
 <ul>
   <li><kbd>super + t</kbd> — open tor</li>
   <li><kbd>super + f</kbd> — open firefox</li>
-  <li><kbd>super + q</kbd> — close app</li>
+  <li><kbd>super + q</kbd> — close</li>
   <li><kbd>super + m</kbd> — maximize / restore</li>
   <li><kbd>super + up</kbd> — maximize</li>
   <li><kbd>super + down</kbd> — restore</li>
@@ -51,10 +50,10 @@
   <li><kbd>super + k</kbd> — input settings</li>
   <li><kbd>super + d</kbd> — display settings</li>
   <li><kbd>ctrl + alt + t</kbd> — open terminal</li>
-  <li><kbd>super + shift + esc</kbd> — shut down</li>
+  <li><kbd>super + shift + esc</kbd> — shutdown</li>
 </ul>
 </section>
-<code class="install-command">sonic install &lt;package&gt;</code>
+<div class="terminal-note"><p class="install-command"><span class="prompt">$</span> <code>sonic install &lt;package&gt;</code></p></div>
 <p class="session-note">apps installed with sonic and their session data stay in ram and are cleared when you shut down</p>
 <pre class="ascii-quote" role="img" aria-label="No one is bound to reveal themselves">   ▄   ████▄     ████▄    ▄   ▄███▄       ▄█    ▄▄▄▄▄       ███   ████▄   ▄      ▄   ██▄          ▄▄▄▄▀ ████▄     █▄▄▄▄ ▄███▄      ▄   ▄███▄   ██   █            ▄▄▄▄▀ ▄  █ ▄███▄   █▀▄▀█    ▄▄▄▄▄   ▄███▄   █       ▄   ▄███▄     ▄▄▄▄▄
     █  █   █     █   █     █  █▀   ▀      ██   █     ▀▄     █  █  █   █    █      █  █  █      ▀▀▀ █    █   █     █  ▄▀ █▀   ▀      █  █▀   ▀  █ █  █         ▀▀▀ █   █   █ █▀   ▀  █ █ █   █     ▀▄ █▀   ▀  █        █  █▀   ▀   █     ▀▄
