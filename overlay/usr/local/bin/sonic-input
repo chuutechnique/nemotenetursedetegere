@@ -1,0 +1,145 @@
+#!/usr/bin/python3
+import os
+import re
+import subprocess
+import xml.etree.ElementTree as ET
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+
+def xinput(*args):
+    return subprocess.run(["xinput", *args], capture_output=True, text=True,
+                          env={**os.environ, "LC_ALL": "C"})
+
+
+window = Gtk.Window(title="input settings")
+window.set_default_size(380, -1)
+window.set_position(Gtk.WindowPosition.CENTER)
+window.connect("destroy", Gtk.main_quit)
+box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=16)
+window.add(box)
+box.pack_start(Gtk.Label(label="pointer device", xalign=0), False, False, 0)
+devices = Gtk.ComboBoxText()
+box.pack_start(devices, False, False, 0)
+box.pack_start(Gtk.Label(label="mouse speed", xalign=0), False, False, 0)
+slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -1.0, 1.0, 0.05)
+box.pack_start(slider, False, False, 0)
+acceleration = Gtk.CheckButton(label="mouse acceleration")
+box.pack_start(acceleration, False, False, 0)
+status = Gtk.Label(xalign=0)
+box.pack_start(status, False, False, 0)
+speeds = {}
+profiles = {}
+for line in xinput("--list", "--short").stdout.splitlines():
+    match = re.search(r"id=(\d+)\s+\[slave\s+pointer", line)
+    if not match:
+        continue
+    device = match[1]
+    properties = xinput("list-props", device).stdout
+    prop = re.search(r"libinput Accel Speed \(\d+\):\s*(-?[\d.]+)",
+                     properties)
+    if prop:
+        speeds[device] = float(prop[1])
+        available = re.search(r"libinput Accel Profiles Available \(\d+\):\s*([01, ]+)", properties)
+        enabled = re.search(r"libinput Accel Profile Enabled \(\d+\):\s*([01, ]+)", properties)
+        if available and enabled and available[1].replace(" ", "").startswith("1,1"):
+            profiles[device] = [int(value) for value in enabled[1].split(",")]
+        devices.append(device, line[:match.start()].strip(" ⎜↳\t").lower())
+
+def apply(scale):
+    device = devices.get_active_id()
+    value = scale.get_value()
+    result = xinput("set-prop", device, "libinput Accel Speed", str(value))
+    if result.returncode == 0:
+        speeds[device] = value
+    status.set_text("" if result.returncode == 0 else "could not set mouse speed")
+
+handler = slider.connect("value-changed", apply)
+
+def toggle(button):
+    device = devices.get_active_id()
+    profile = profiles[device]
+    active = int(button.get_active())
+    values = [active, 1 - active] + [0] * (len(profile) - 2)
+    result = xinput("set-prop", device, "libinput Accel Profile Enabled",
+                    *map(str, values))
+    if result.returncode == 0:
+        profiles[device] = values
+        status.set_text("")
+    else:
+        with button.handler_block(toggle_handler):
+            button.set_active(bool(profile[0]))
+        status.set_text("could not set mouse acceleration")
+
+
+toggle_handler = acceleration.connect("toggled", toggle)
+
+
+def select(combo):
+    device = combo.get_active_id()
+    with slider.handler_block(handler):
+        slider.set_value(speeds[device])
+    with acceleration.handler_block(toggle_handler):
+        acceleration.set_active(bool(profiles.get(device, [0])[0]))
+    acceleration.set_sensitive(device in profiles)
+    status.set_text("")
+
+devices.connect("changed", select)
+if speeds:
+    devices.set_active(0)
+else:
+    slider.set_sensitive(False)
+    acceleration.set_sensitive(False)
+    status.set_text("no pointer device with adjustable speed found")
+box.pack_start(Gtk.Separator(), False, False, 0)
+box.pack_start(Gtk.Label(label="keyboard layout", xalign=0), False, False, 0)
+layouts = Gtk.ComboBoxText()
+variants = Gtk.ComboBoxText()
+box.pack_start(layouts, False, False, 0)
+box.pack_start(variants, False, False, 0)
+keyboard_status = Gtk.Label(xalign=0)
+apply_layout = Gtk.Button(label="apply keyboard layout")
+box.pack_start(apply_layout, False, False, 0)
+box.pack_start(keyboard_status, False, False, 0)
+layout_variants = {}
+catalog = ET.parse("/usr/share/X11/xkb/rules/evdev.xml")
+for layout in catalog.findall("./layoutList/layout"):
+    name = layout.findtext("configItem/name")
+    layouts.append(name, layout.findtext("configItem/description").lower())
+    layout_variants[name] = [
+        (variant.findtext("configItem/name"), variant.findtext("configItem/description"))
+        for variant in layout.findall("./variantList/variant")
+    ]
+
+
+def select_layout(combo):
+    variants.remove_all()
+    variants.append("default", "default variant")
+    for name, description in layout_variants[combo.get_active_id()]:
+        variants.append(name, description.lower())
+    variants.set_active(0)
+
+
+def set_layout(_button):
+    variant = variants.get_active_id()
+    result = subprocess.run(["setxkbmap", "-layout", layouts.get_active_id(),
+                             "-variant", "" if variant == "default" else variant],
+                            capture_output=True)
+    keyboard_status.set_text("keyboard layout applied" if result.returncode == 0
+                             else "could not set keyboard layout")
+
+
+layouts.connect("changed", select_layout)
+apply_layout.connect("clicked", set_layout)
+current = dict(line.split(":", 1) for line in
+               subprocess.run(["setxkbmap", "-query"], capture_output=True, text=True)
+               .stdout.splitlines() if ":" in line)
+layouts.set_active_id(current.get("layout", "us").strip().split(",")[0])
+if layouts.get_active_id() is None:
+    layouts.set_active(0)
+variants.set_active_id(current.get("variant", "").strip().split(",")[0] or "default")
+window.show_all()
+Gtk.main()

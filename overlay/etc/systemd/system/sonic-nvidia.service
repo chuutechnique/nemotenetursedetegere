@@ -1,0 +1,13 @@
+[Unit]
+Description=Load NVIDIA graphics for nemoTeneturSeDetegere
+ConditionKernelCommandLine=sonic.nvidia=1
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecCondition=/bin/sh -c 'grep -qiE "^pci:v000010DE.*bc03" /sys/bus/pci/devices/*/modalias'
+ExecStart=/usr/sbin/modprobe nvidia_drm modeset=1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,155 @@
+--- a/openbox/client.c
++++ b/openbox/client.c
+@@ -106,8 +106,6 @@
+                                                       gboolean bylayer,
+                                                       ObStackingLayer layer);
+ static void client_call_notifies(ObClient *self, GSList *list);
+-static void client_ping_event(ObClient *self, gboolean dead);
+-static void client_prompt_kill(ObClient *self);
+ static gboolean client_can_steal_focus(ObClient *self,
+                                        gboolean allow_other_desktop,
+                                        gboolean request_from_user,
+@@ -1788,7 +1786,6 @@
+     self->functions =
+         (OB_CLIENT_FUNC_RESIZE |
+          OB_CLIENT_FUNC_MOVE |
+-         OB_CLIENT_FUNC_ICONIFY |
+          OB_CLIENT_FUNC_MAXIMIZE |
+          OB_CLIENT_FUNC_SHADE |
+          OB_CLIENT_FUNC_CLOSE |
+@@ -3549,28 +3546,6 @@
+     frame_adjust_area(self->frame, FALSE, TRUE, FALSE);
+ }
+ 
+-static void client_ping_event(ObClient *self, gboolean dead)
+-{
+-    if (self->not_responding != dead) {
+-        self->not_responding = dead;
+-        client_update_title(self);
+-
+-        if (dead)
+-            /* the client isn't responding, so ask to kill it */
+-            client_prompt_kill(self);
+-        else {
+-            /* it came back to life ! */
+-
+-            if (self->kill_prompt) {
+-                prompt_unref(self->kill_prompt);
+-                self->kill_prompt = NULL;
+-            }
+-
+-            self->kill_level = 0;
+-        }
+-    }
+-}
+-
+ void client_close(ObClient *self)
+ {
+     if (!(self->functions & OB_CLIENT_FUNC_CLOSE)) return;
+@@ -3581,105 +3556,7 @@
+         return;
+     }
+ 
+-    /* in the case that the client provides no means to requesting that it
+-       close, we just kill it */
+-    if (!self->delete_window)
+-        /* don't use client_kill(), we should only kill based on PID in
+-           response to a lack of PING replies */
+-        XKillClient(obt_display, self->window);
+-    else {
+-        /* request the client to close with WM_DELETE_WINDOW */
+-        OBT_PROP_MSG_TO(self->window, self->window, WM_PROTOCOLS,
+-                        OBT_PROP_ATOM(WM_DELETE_WINDOW), event_time(),
+-                        0, 0, 0, NoEventMask);
+-
+-        /* we're trying to close the window, so see if it is responding. if it
+-           is not, then we will let them kill the window */
+-        if (self->ping)
+-            ping_start(self, client_ping_event);
+-
+-        /* if we already know the window isn't responding (maybe they clicked
+-           no in the kill dialog but it hasn't come back to life), then show
+-           the kill dialog */
+-        if (self->not_responding)
+-            client_prompt_kill(self);
+-    }
+-}
+-
+-#define OB_KILL_RESULT_NO 0
+-#define OB_KILL_RESULT_YES 1
+-
+-static gboolean client_kill_requested(ObPrompt *p, gint result, gpointer data)
+-{
+-    ObClient *self = data;
+-
+-    if (result == OB_KILL_RESULT_YES)
+-        client_kill(self);
+-    return TRUE; /* call the cleanup func */
+-}
+-
+-static void client_kill_cleanup(ObPrompt *p, gpointer data)
+-{
+-    ObClient *self = data;
+-
+-    g_assert(p == self->kill_prompt);
+-
+-    prompt_unref(self->kill_prompt);
+-    self->kill_prompt = NULL;
+-}
+-
+-static void client_prompt_kill(ObClient *self)
+-{
+-    /* check if we're already prompting */
+-    if (!self->kill_prompt) {
+-        ObPromptAnswer answers[] = {
+-            { 0, OB_KILL_RESULT_NO },
+-            { 0, OB_KILL_RESULT_YES }
+-        };
+-        gchar *m;
+-        const gchar *y, *title;
+-
+-        title = self->original_title;
+-        if (title[0] == '\0') {
+-            /* empty string, so use its parent */
+-            ObClient *p = client_search_top_direct_parent(self);
+-            if (p) title = p->original_title;
+-        }
+-
+-        if (client_on_localhost(self)) {
+-            const gchar *sig;
+-
+-            if (self->kill_level == 0)
+-                sig = "terminate";
+-            else
+-                sig = "kill";
+-
+-            m = g_strdup_printf
+-                (_("The window \"%s\" does not seem to be responding.  Do you want to force it to exit by sending the %s signal?"),
+-                 title, sig);
+-            y = _("End Process");
+-        }
+-        else {
+-            m = g_strdup_printf
+-                (_("The window \"%s\" does not seem to be responding.  Do you want to disconnect it from the X server?"),
+-                 title);
+-            y = _("Disconnect");
+-        }
+-        /* set the dialog buttons' text */
+-        answers[0].text = _("Cancel");  /* "no" */
+-        answers[1].text = y;            /* "yes" */
+-
+-        self->kill_prompt = prompt_new(m, NULL, answers,
+-                                       sizeof(answers)/sizeof(answers[0]),
+-                                       OB_KILL_RESULT_NO, /* default = no */
+-                                       OB_KILL_RESULT_NO, /* cancel = no */
+-                                       client_kill_requested,
+-                                       client_kill_cleanup,
+-                                       self);
+-        g_free(m);
+-    }
+-
+-    prompt_show(self->kill_prompt, self, TRUE);
++    XKillClient(obt_display, self->window);
+ }
+ 
+ void client_kill(ObClient *self)

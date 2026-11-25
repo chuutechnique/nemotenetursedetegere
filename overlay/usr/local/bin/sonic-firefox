@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+"""Keep direct Firefox available, with an explicit warning on every launch."""
+import os
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+
+dialog = Gtk.MessageDialog(
+    message_type=Gtk.MessageType.WARNING,
+    buttons=Gtk.ButtonsType.OK_CANCEL,
+    text="Firefox uses a direct connection, outside Tor",
+)
+dialog.format_secondary_text(
+    "Websites can see your public IP address or your VPN exit address. "
+    "For Tor browsing, cancel and use Super+T. "
+    "Keeping files in RAM does not make this connection anonymous."
+)
+dialog.set_title("Direct connection warning")
+microphone = Gtk.CheckButton(label="allow microphone in this Firefox session")
+dialog.get_content_area().pack_start(microphone, False, False, 8)
+microphone.show()
+dialog.set_default_response(Gtk.ResponseType.CANCEL)
+response = dialog.run()
+allow_microphone = microphone.get_active()
+dialog.destroy()
+if response == Gtk.ResponseType.OK:
+    options = ["--microphone"] if allow_microphone else []
+    os.execv("/usr/local/bin/sonic-sandbox", ["sonic-sandbox", "firefox", *options, *sys.argv[1:]])

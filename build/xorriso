@@ -1,0 +1,4 @@
+#!/bin/sh
+export LC_ALL=C
+export GCONV_PATH="$DEBIAN_ROOT/usr/lib/x86_64-linux-gnu/gconv"
+exec "$DEBIAN_ROOT/lib64/ld-linux-x86-64.so.2" --library-path "$DEBIAN_ROOT/usr/lib/x86_64-linux-gnu" "$DEBIAN_ROOT/usr/bin/xorriso" "$@"

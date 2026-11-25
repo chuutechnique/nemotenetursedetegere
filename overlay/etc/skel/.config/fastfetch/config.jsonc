@@ -1,0 +1,51 @@
+{
+  "logo": {
+    "source": "/usr/local/share/sonic-os/fastfetch-nemo-text.txt",
+    "type": "file",
+    "color": {
+      "1": "red"
+    },
+    "padding": {
+      "top": 5
+    }
+  },
+  "display": {
+    "color": {
+      "keys": "red",
+      "title": "red"
+    }
+  },
+  "modules": [
+    "title",
+    "separator",
+    "os",
+    "host",
+    "kernel",
+    "uptime",
+    "shell",
+    "display",
+    "de",
+    "wm",
+    "wmtheme",
+    "theme",
+    "icons",
+    "font",
+    "cursor",
+    "terminal",
+    "terminalfont",
+    "cpu",
+    {
+      "type": "gpu",
+      "detectionMethod": "pci"
+    },
+    "memory",
+    "swap",
+    "disk",
+    "localip",
+    "battery",
+    "poweradapter",
+    "locale",
+    "break",
+    "colors"
+  ]
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+state="${XDG_RUNTIME_DIR:?}/sonic-wallpaper"
+if [ -f "$state" ]; then
+    feh --no-fehbg --bg-fill /usr/local/share/sonic-os/black.png
+    rm "$state"
+else
+    feh --no-fehbg --bg-tile /usr/local/share/sonic-os/wallpaper.png
+    touch "$state"
+fi

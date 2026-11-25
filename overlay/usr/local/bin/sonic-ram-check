@@ -1,0 +1,112 @@
+#!/usr/bin/python3
+"""Read-only evidence about RAM backing. Cannot inspect a hypervisor/firmware."""
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+
+
+def output(*args):
+    return subprocess.check_output(args, text=True, timeout=15).strip()
+
+
+def mount(path):
+    data = json.loads(output("findmnt", "--json", "--target", str(path),
+                             "--output", "TARGET,SOURCE,FSTYPE,OPTIONS"))
+    return data["filesystems"][0]
+
+
+def unescape(value):
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), value)
+
+
+def inspect():
+    checks = []
+    warnings = []
+
+    def check(name, passed, details):
+        checks.append({"name": name, "passed": bool(passed), "details": details})
+
+    command_line = Path("/proc/cmdline").read_text().split()
+    for flag in ("toram", "nopersistence", "noswap", "noresume"):
+        check("boot_" + flag, flag in command_line, command_line)
+    swaps = Path("/proc/swaps").read_text().splitlines()[1:]
+    check("no_active_swap", not swaps, swaps)
+    medium = mount("/run/live/medium")
+    check("live_medium_in_ram", medium["fstype"] in {"tmpfs", "ramfs"}, medium)
+    root = mount("/")
+    check("root_is_overlay", root["fstype"] == "overlay", root)
+    options = dict(item.split("=", 1) for item in root.get("options", "").split(",") if "=" in item)
+    upper = options.get("upperdir")
+    upper_mount = mount(unescape(upper)) if upper else None
+    root_in_ram = bool(upper_mount and upper_mount["fstype"] in {"tmpfs", "ramfs"})
+    check("writable_root_in_ram", root_in_ram, upper_mount)
+    lower_dirs = options.get("lowerdir", "").split(":")
+    lower_checks = []
+    for lower in filter(None, lower_dirs):
+        record = mount(unescape(lower))
+        source = record["source"].split("[", 1)[0]
+        if record["fstype"] in {"tmpfs", "ramfs"}:
+            lower_checks.append({"mount": record, "in_ram": True})
+        elif record["fstype"] == "squashfs" and source.startswith("/dev/loop"):
+            backing = Path("/sys/class/block") / Path(source).name / "loop/backing_file"
+            backing_path = unescape(backing.read_text().strip())
+            backing_mount = mount(backing_path)
+            lower_checks.append({"mount": record, "backing_file": backing_path,
+                                 "backing_mount": backing_mount,
+                                 "in_ram": backing_mount["fstype"] in {"tmpfs", "ramfs"}})
+        else:
+            lower_checks.append({"mount": record, "in_ram": False})
+    check("read_only_system_image_in_ram", bool(lower_checks) and all(x["in_ram"] for x in lower_checks), lower_checks)
+    for path in ("/home/nemo", "/run", "/tmp", "/var/tmp", "/var/log", "/opt/tor-browser"):
+        record = mount(path)
+        in_ram = record["fstype"] in {"tmpfs", "ramfs"} or (record["fstype"] == "overlay" and root_in_ram and record["target"] == "/")
+        check("path_" + path, in_ram, record)
+    # Inspect mounts as well as the read-only flag of disks and partitions.
+    real = json.loads(output("findmnt", "--json", "--real", "--output", "TARGET,SOURCE,FSTYPE,OPTIONS"))
+    mounts = []
+
+    def flatten(records):
+        for record in records:
+            mounts.append(record)
+            flatten(record.get("children", []))
+
+    flatten(real.get("filesystems", []))
+    writable = [m for m in mounts if m.get("source", "").startswith("/dev/")
+                and not m["source"].startswith(("/dev/loop", "/dev/ram", "/dev/zram"))
+                and "rw" in m.get("options", "").split(",")]
+    check("no_writable_physical_mounts", not writable, writable)
+    disks = json.loads(output("lsblk", "--json", "--list", "--output", "KNAME,TYPE,RO"))["blockdevices"]
+    physical = [d for d in disks if d["type"] in {"disk", "part", "crypt", "lvm"}
+                and not d["kname"].startswith(("loop", "ram", "zram"))]
+    check("physical_disks_read_only", all(d["ro"] in {True, 1, "1"} for d in physical), physical)
+    permissions = []
+    for name in ("/etc/polkit-1/rules.d",
+                 "/etc/udev/rules.d/90-tor-live-disks.rules",
+                 "/etc/systemd/system/sonic-nvidia.service",
+                 "/usr/local/bin/sonic", "/usr/local/bin/sonic-sandbox"):
+        info = Path(name).stat()
+        permissions.append({"path": name, "uid": info.st_uid,
+                            "mode": oct(info.st_mode & 0o7777),
+                            "safe": info.st_uid == 0 and not info.st_mode & 0o022})
+    check("protected_system_configuration", all(p["safe"] for p in permissions), permissions)
+    for path in ("/sys/firmware/efi/efivars", "/sys/fs/pstore"):
+        if Path(path).exists():
+            record = mount(path)
+            if record["fstype"] in {"efivarfs", "pstore"} and "rw" in record.get("options", "").split(","):
+                warnings.append({"name": "firmware_storage_writable", "mount": record})
+    warnings.append({"name": "outside_guest_not_observable", "details": "Host swap, VM snapshots, firmware, remote logs and physical RAM remanence are outside this check."})
+    return {"passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--strict", action="store_true", help="return a failure code if a RAM check fails")
+    args = parser.parse_args()
+    try:
+        report = inspect()
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        report = {"passed": False, "error": str(error)}
+    print(json.dumps(report, indent=2))
+    raise SystemExit(1 if args.strict and not report["passed"] else 0)

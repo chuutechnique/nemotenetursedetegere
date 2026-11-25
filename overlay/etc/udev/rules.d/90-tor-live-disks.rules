@@ -1,0 +1,2 @@
+SUBSYSTEM=="block", ACTION=="add|change", ENV{DEVTYPE}=="disk", KERNEL!="loop*|ram*|zram*|sr*", RUN+="/usr/sbin/blockdev --setro $devnode"
+SUBSYSTEM=="block", ACTION=="add|change", ENV{DEVTYPE}=="partition", RUN+="/usr/sbin/blockdev --setro $devnode"

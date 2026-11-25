@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+if [ "$(findmnt -n -o FSTYPE --mountpoint /run/live/medium)" != tmpfs ]; then
+    exec systemctl poweroff
+fi
+umask 077
+# Debian Live keeps the root upper layer in RAM. Run from that overlay instead
+# of making another full, uncompressed copy of the browser in /run/user.
+browser=/opt/tor-browser
+runtime=${XDG_RUNTIME_DIR:?}
+if [ "$(findmnt -n -o FSTYPE --target /)" != overlay ] || [ ! -w "$browser/Browser/TorBrowser/Data/Browser/profile.default" ]; then
+    printf '%s\n' 'Tor Browser requires the writable RAM overlay. Rebuild the image with the current assemble.sh.' >&2
+    exit 1
+fi
+if [ ! -e "$runtime/sonic-browser-initialized" ]; then
+    cat > "$browser/Browser/TorBrowser/Data/Browser/profile.default/user.js" <<'PREFS'
+user_pref("extensions.activeThemeID", "firefox-compact-dark@mozilla.org");
+user_pref("browser.startup.homepage", "file:///usr/local/share/sonic-os/start.html");
+user_pref("browser.startup.page", 1);
+PREFS
+    touch "$runtime/sonic-browser-initialized"
+fi
+exec /usr/local/bin/sonic-sandbox tor file:///usr/local/share/sonic-os/start.html about:torconnect

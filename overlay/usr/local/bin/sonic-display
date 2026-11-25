@@ -1,0 +1,107 @@
+#!/usr/bin/python3
+import re
+import subprocess
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+
+
+def query():
+    outputs = {}
+    current = None
+    for line in subprocess.check_output(["xrandr", "--query"], text=True).splitlines():
+        if line and not line[0].isspace():
+            match = re.match(r"(\S+) connected (?:primary )?\d+x\d+\+", line)
+            current = {} if match else None
+            if match:
+                outputs[match[1]] = current
+        elif current is not None:
+            fields = line.split()
+            if fields and re.fullmatch(r"\d+x\d+\S*", fields[0]):
+                for rate in fields[1:]:
+                    if "*" in rate:
+                        current.update(mode=fields[0], rate=rate.rstrip("*+"),
+                                       rates=[item.rstrip("*+") for item in fields[1:]])
+    return {name: mode for name, mode in outputs.items() if mode}
+
+
+window = Gtk.Window(title="display settings")
+window.set_default_size(360, -1)
+window.set_position(Gtk.WindowPosition.CENTER)
+window.connect("destroy", Gtk.main_quit)
+box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=16)
+window.add(box)
+outputs = Gtk.ComboBoxText()
+rates = Gtk.ComboBoxText()
+status = Gtk.Label(xalign=0, wrap=True)
+for label, combo in (("display", outputs), ("refresh rate", rates)):
+    box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+    box.pack_start(combo, False, False, 0)
+apply = Gtk.Button(label="apply")
+layout = Gtk.Button(label="screen layout and resolution")
+for widget in (apply, layout, status):
+    box.pack_start(widget, False, False, 0)
+
+
+def select(combo):
+    rates.remove_all()
+    mode = modes.get(combo.get_active_id())
+    if mode:
+        for rate in mode["rates"]:
+            rates.append(rate, f"{rate} hz")
+        rates.set_active_id(mode["rate"])
+    apply.set_sensitive(bool(mode))
+
+
+def refresh():
+    global modes
+    selected = outputs.get_active_id()
+    try:
+        modes = query()
+    except subprocess.CalledProcessError:
+        modes = {}
+    outputs.remove_all()
+    for output in modes:
+        outputs.append(output, output.lower())
+    if not outputs.set_active_id(selected or ""):
+        outputs.set_active(0)
+    apply.set_sensitive(bool(modes))
+
+
+def set_rate(_button):
+    output, rate = outputs.get_active_id(), rates.get_active_id()
+    if output not in modes or rate is None:
+        return
+    result = subprocess.run(["xrandr", "--output", output, "--mode",
+                             modes[output]["mode"], "--rate", rate], capture_output=True)
+    refresh()
+    status.set_text("refresh rate applied" if result.returncode == 0
+                    else "could not set the refresh rate")
+
+
+outputs.connect("changed", select)
+apply.connect("clicked", set_rate)
+
+
+def open_layout(_button):
+    from gi.repository import GLib
+
+    child = subprocess.Popen(["arandr"])
+    layout.set_sensitive(False)
+
+    def check():
+        if child.poll() is None:
+            return True
+        refresh()
+        layout.set_sensitive(True)
+        return False
+
+    GLib.timeout_add(300, check)
+
+
+layout.connect("clicked", open_layout)
+refresh()
+window.show_all()
+Gtk.main()

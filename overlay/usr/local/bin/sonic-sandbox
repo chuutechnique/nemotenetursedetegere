@@ -1,0 +1,364 @@
+#!/usr/bin/python3
+"""Per-application RAM state, PID/IPC/network namespaces and nested X11.
+
+The desktop, this broker, Xephyr, slirp and the kernel are trusted components.
+No application receives the host home, session bus or main display socket.
+"""
+import fcntl
+import json
+import os
+from pathlib import Path
+import secrets
+import select
+import signal
+import struct
+import subprocess
+import sys
+import time
+
+
+TOOLS = {
+    "nmap": "/usr/bin/nmap", "dig": "/usr/bin/dig",
+    "whois": "/usr/bin/whois", "netcat": "/usr/bin/nc.openbsd",
+    "curl": "/usr/bin/curl", "jq": "/usr/bin/jq",
+    "exiftool": "/usr/bin/exiftool",
+}
+GUI = {"tor": "Tor Browser", "firefox": "Firefox", "discord": "Discord"}
+
+
+def private_dir(path):
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink() or path.stat().st_uid != os.getuid():
+        raise RuntimeError("unsafe sandbox directory")
+    path.chmod(0o700)
+    return path
+
+
+def ready(fd, timeout=15):
+    if not select.select([fd], [], [], timeout)[0]:
+        raise RuntimeError("sandbox startup timed out")
+    data = os.read(fd, 16384)
+    if not data:
+        raise RuntimeError("a sandbox helper stopped during startup")
+    return data
+
+
+def xauthority(path, number, cookie):
+    fields = [b"", str(number).encode(), b"MIT-MAGIC-COOKIE-1", cookie]
+    path.write_bytes(struct.pack(">H", 65535) + b"".join(
+        struct.pack(">H", len(field)) + field for field in fields))
+    path.chmod(0o600)
+
+
+def stop(process):
+    if process and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=4)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=4)
+
+
+def command(app, args, runtime):
+    if app == "tor":
+        return ["/opt/tor-browser/Browser/start-tor-browser", *args]
+    if app == "firefox":
+        return ["/usr/bin/firefox-esr", "--no-remote", *args]
+    if app == "discord":
+        return ["/opt/discord/discord", *args]
+    if app == "cowsay":
+        return ["/opt/cowsay/usr/games/cowsay", *args]
+    if app in TOOLS:
+        return [TOOLS[app], *args]
+    raise RuntimeError("unknown sandbox application")
+
+
+def mounts(app, home, shared, runtime, resolver):
+    uid = os.getuid()
+    resolver_destination = os.path.realpath("/etc/resolv.conf")
+    if not resolver_destination.startswith(("/etc/", "/run/")):
+        raise RuntimeError("unsupported resolver configuration path")
+    argv = ["/usr/bin/bwrap", "--unshare-user", "--unshare-pid",
+            "--unshare-ipc", "--unshare-net", "--unshare-uts",
+            "--unshare-cgroup-try", "--new-session", "--die-with-parent",
+            "--cap-drop", "ALL", "--hostname", "nemo",
+            "--ro-bind", "/usr", "/usr", "--ro-bind", "/etc", "/etc",
+            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+            "--tmpfs", "/run", "--dir", "/var", "--dir", "/var/tmp",
+            "--ro-bind", str(resolver), resolver_destination,
+            "--ro-bind", str(resolver.with_name("machine-id")), "/etc/machine-id",
+            "--dir", "/var/lib/dbus", "--symlink", "/etc/machine-id", "/var/lib/dbus/machine-id",
+            "--bind", str(home), "/home/nemo",
+            "--bind", str(shared), "/home/nemo/Shared",
+            "--perms", "0700", "--dir", f"/run/user/{uid}",
+            "--clearenv", "--setenv", "HOME", "/home/nemo",
+            "--setenv", "USER", "nemo", "--setenv", "LOGNAME", "nemo",
+            "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
+            "--setenv", "LANG", "en_US.UTF-8",
+            "--setenv", "XDG_RUNTIME_DIR", f"/run/user/{uid}",
+            "--setenv", "GTK_THEME", "Adwaita:dark",
+            "--chdir", "/home/nemo"]
+    for name in ("bin", "sbin", "lib", "lib64"):
+        path = Path("/") / name
+        if path.is_symlink():
+            argv += ["--symlink", os.readlink(path), str(path)]
+        elif path.exists():
+            argv += ["--ro-bind", str(path), str(path)]
+    # Hardware rendering remains available; kernel/GPU drivers are still trusted.
+    if Path("/dev/dri").exists():
+        argv += ["--dev-bind", "/dev/dri", "/dev/dri"]
+    for path in Path("/dev").glob("nvidia*"):
+        argv += ["--dev-bind", str(path), str(path)]
+    if Path("/sys").exists():
+        argv += ["--ro-bind", "/sys", "/sys"]
+    if app == "tor":
+        argv += ["--bind", "/opt/tor-browser", "/opt/tor-browser"]
+    elif app in {"discord", "cowsay"}:
+        bundle = runtime / "sonic-apps" / app
+        if not bundle.is_dir():
+            raise RuntimeError(f"run sonic install {app} first")
+        argv += ["--bind" if app == "discord" else "--ro-bind", str(bundle), f"/opt/{app}"]
+        if app == "cowsay":
+            argv += ["--setenv", "COWPATH", "/opt/cowsay/usr/share/cowsay/cows"]
+    # Do not forward LD_*, browser sandbox overrides, DBus or host display env.
+    for key in ("TERM", "COLORTERM"):
+        if key in os.environ:
+            argv += ["--setenv", key, os.environ[key]]
+    return argv
+
+
+def network(pid, processes, log, state):
+    net_fd = os.open(f"/proc/{pid}/ns/net", os.O_RDONLY)
+    # --dev makes bwrap create an additional user namespace. The network is
+    # owned by its parent, not necessarily /proc/PID/ns/user.
+    owner_fd = fcntl.ioctl(net_fd, 0xB701)  # NS_GET_USERNS
+    read_fd, write_fd = os.pipe()
+    try:
+        proc = subprocess.Popen([
+            "/usr/bin/slirp4netns", "--configure", "--enable-ipv6",
+            "--disable-host-loopback", "--enable-seccomp",
+            f"--ready-fd={write_fd}", f"--userns-path=/proc/self/fd/{owner_fd}",
+            "--netns-type=path", f"/proc/self/fd/{net_fd}", "tap0"],
+            pass_fds=(write_fd, owner_fd, net_fd), stdout=log, stderr=log)
+        processes.append(proc)
+        os.close(write_fd)
+        write_fd = None
+        if ready(read_fd) != b"1":
+            raise RuntimeError("sandbox networking did not initialize")
+    finally:
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
+    # slirp DNS can otherwise expose non-DNS loopback ports when the host uses
+    # a local resolver. Only DNS is allowed through its resolver aliases.
+    prefix = ["/usr/bin/nsenter", f"--user=/proc/self/fd/{owner_fd}",
+              "--preserve-credentials", f"--net=/proc/self/fd/{net_fd}", "--"]
+    try:
+        for binary, dns, gateway in (("iptables", "10.0.2.3", "10.0.2.2"),
+                                     ("ip6tables", "fd00::3", "fd00::2")):
+            tool = f"/usr/sbin/{binary}"
+            for rule in (["-d", dns, "-p", "udp", "--dport", "53", "-j", "ACCEPT"],
+                         ["-d", dns, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"],
+                         ["-d", dns, "-j", "REJECT"], ["-d", gateway, "-j", "REJECT"]):
+                subprocess.run([*prefix, tool, "-A", "OUTPUT", *rule],
+                               check=True, stdout=log, stderr=log, timeout=10,
+                               pass_fds=(owner_fd, net_fd),
+                               env={**os.environ, "XTABLES_LOCKFILE": str(state / "iptables.lock")})
+    finally:
+        os.close(owner_fd)
+        os.close(net_fd)
+
+
+def audio(state, microphone, processes, log):
+    """Expose raw PCM FIFOs, never the host PulseAudio control socket."""
+    directory = private_dir(state / "audio")
+    for name in ("playback.pcm", "microphone.pcm"):
+        path = directory / name
+        path.unlink(missing_ok=True)
+        if name == "playback.pcm":
+            os.mkfifo(path, 0o600)
+    subprocess.run(["/usr/bin/pulseaudio", "--start", "--exit-idle-time=-1"],
+                   check=True, stdout=log, stderr=log, timeout=10)
+    playback = subprocess.Popen([
+        "/bin/sh", "-c", 'exec /usr/bin/pacat --playback --raw --rate=48000 --channels=2 --format=s16le < "$1"',
+        "audio", str(directory / "playback.pcm")], stdout=log, stderr=log)
+    processes.append(playback)
+    if microphone:
+        # module-pipe-source creates its FIFO itself. Open only that FIFO after
+        # it appears, without following a symlink supplied by the application.
+        writer = '''import os,stat,sys,time
+deadline=time.monotonic()+30
+while True:
+ try:
+  fd=os.open(sys.argv[1],os.O_WRONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+  if not stat.S_ISFIFO(os.fstat(fd).st_mode):
+   os.close(fd);raise RuntimeError("microphone endpoint is not a FIFO")
+  break
+ except OSError:
+  if time.monotonic()>deadline:raise
+  time.sleep(.1)
+os.set_blocking(fd,True)
+os.dup2(fd,1)
+if fd!=1:os.close(fd)
+os.execv("/usr/bin/pacat",["pacat","--record","--raw","--rate=48000","--channels=1","--format=s16le"])
+'''
+        recording = subprocess.Popen([
+            "/usr/bin/python3", "-c", writer, str(directory / "microphone.pcm")],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+        processes.append(recording)
+    return directory
+
+
+def run(app, args):
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        raise RuntimeError("run this command inside the live desktop session")
+    runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+    state = private_dir(runtime / "sonic-sandboxes" / app)
+    home = private_dir(state / "home")
+    shared = private_dir(Path.home() / "Shared")
+    processes = []
+    open_fds = []
+    log = (state / "session.log").open("w+b", buffering=0)
+    gui = app in GUI
+    microphone = bool(args and args[0] == "--microphone")
+    if microphone:
+        args = args[1:]
+    lock = (state / "launch.lock").open("a")
+    if gui:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            title = f"nemo-{app}-isolated"
+            keys = ["ctrl+n"] if app in {"tor", "firefox"} else []
+            subprocess.run(["xdotool", "search", "--name", f"^{title}$",
+                            "windowactivate", "--sync", "key", "--clearmodifiers",
+                            *keys] if keys else ["xdotool", "search", "--name",
+                            f"^{title}$", "windowactivate", "--sync"], timeout=5)
+            return 0
+    if app == "discord" and not microphone:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+        dialog = Gtk.MessageDialog(message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.YES_NO,
+                                   text="Allow Discord to use the microphone?")
+        dialog.format_secondary_text("Choose No to keep the microphone disconnected from this session. Playback remains available.")
+        dialog.set_default_response(Gtk.ResponseType.NO)
+        microphone = dialog.run() == Gtk.ResponseType.YES
+        dialog.destroy()
+    resolver = state / "resolv.conf"
+    resolver.write_text("nameserver 10.0.2.3\noptions timeout:2 attempts:3\n")
+    machine_id = state / "machine-id"
+    if not machine_id.exists():
+        machine_id.write_text(secrets.token_hex(16) + "\n")
+    argv = mounts(app, home, shared, runtime, resolver)
+    try:
+        if gui:
+            directory = audio(state, microphone, processes, log)
+            argv += ["--bind", str(directory), "/run/sandbox-audio",
+                     "--setenv", "PULSE_SERVER", f"unix:/run/user/{os.getuid()}/pulse/native"]
+            if microphone:
+                argv += ["--setenv", "SONIC_MICROPHONE", "1"]
+            cookie = secrets.token_bytes(16)
+            auth = state / "xauthority"
+            xauthority(auth, 0, cookie)
+            read_fd, write_fd = os.pipe()
+            open_fds += [read_fd, write_fd]
+            xephyr = subprocess.Popen([
+                "/usr/bin/Xephyr", "-displayfd", str(write_fd),
+                "-auth", str(auth), "-nolisten", "tcp",
+                "-noreset", "-resizeable", "-screen", "1024x768",
+                "-title", f"nemo-{app}-isolated"], pass_fds=(write_fd,),
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+            processes.append(xephyr)
+            os.close(write_fd)
+            open_fds.remove(write_fd)
+            number = int(ready(read_fd).strip())
+            os.close(read_fd)
+            open_fds.remove(read_fd)
+            xauthority(auth, number, cookie)
+            argv += ["--dir", "/tmp/.X11-unix", "--ro-bind",
+                     f"/tmp/.X11-unix/X{number}", f"/tmp/.X11-unix/X{number}",
+                     "--ro-bind", str(auth), "/run/sandbox.xauth",
+                     "--setenv", "XAUTHORITY", "/run/sandbox.xauth",
+                     "--setenv", "DISPLAY", f":{number}"]
+        info_read, info_write = os.pipe()
+        open_fds += [info_read, info_write]
+        gate = state / ("start-" + secrets.token_hex(8))
+        os.mkfifo(gate, 0o600)
+        argv += ["--ro-bind", str(gate), "/run/sonic-start"]
+        target = command(app, args, runtime)
+        if gui:
+            inner = Path(__file__).resolve().with_name("sonic-sandbox-inner")
+            argv += ["--ro-bind", str(inner), "/run/sonic-inner.py"]
+            target = ["/usr/bin/python3", "/run/sonic-inner.py", app, *target]
+        barrier = 'import os,sys; f=open("/run/sonic-start","rb",buffering=0); ok=f.read(1)==b"1"; f.close(); sys.exit(1) if not ok else os.execv(sys.argv[1],sys.argv[1:])'
+        argv += ["--info-fd", str(info_write), "--", "/usr/bin/python3", "-c", barrier, *target]
+        child = subprocess.Popen(argv, pass_fds=(info_write,),
+                                 stdin=subprocess.DEVNULL if gui else None,
+                                 stdout=log if gui else None, stderr=log if gui else None)
+        processes.append(child)
+        for fd in (info_write,):
+            os.close(fd)
+            open_fds.remove(fd)
+        info = ready(info_read)
+        while b"\n}" not in info and not info.rstrip().endswith(b"}"):
+            info += ready(info_read)
+        pid = json.loads(info)["child-pid"]
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                writer = os.open(gate, os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError:
+                if child.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError("application startup barrier did not initialize")
+                time.sleep(0.05)
+        open_fds.append(writer)
+        # The info fd is written before bwrap finishes its privilege changes.
+        # Wait for our trusted barrier to open the FIFO before inspecting /proc.
+        if app not in {"jq", "exiftool", "cowsay"}:
+            network(pid, processes, log, state)
+        try:
+            os.write(writer, b"1")
+        finally:
+            os.close(writer)
+            open_fds.remove(writer)
+        while child.poll() is None:
+            if os.fstat(log.fileno()).st_size > 1024 * 1024:
+                log.truncate(0)
+                log.seek(0)
+            # Audio clients can legitimately exit when a playback stream closes.
+            if gui and xephyr.poll() is not None:
+                raise RuntimeError("an isolation helper stopped; application closed")
+            if app not in {"jq", "exiftool", "cowsay"} and processes[-1].poll() is not None:
+                raise RuntimeError("sandbox networking stopped; application closed")
+            time.sleep(0.25)
+        return child.returncode
+    finally:
+        for proc in reversed(processes):
+            stop(proc)
+        for fd in open_fds:
+            os.close(fd)
+        if 'gate' in locals():
+            gate.unlink(missing_ok=True)
+        log.close()
+        lock.close()
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in {*GUI, *TOOLS, "cowsay"}:
+        raise RuntimeError("usage: sonic-sandbox <application> [arguments]")
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    return run(sys.argv[1], sys.argv[2:])
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as error:
+        print(f"sandbox: {error}; no unisolated fallback was started", file=sys.stderr)
+        raise SystemExit(1)

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <theme><name>Nightmare</name></theme>
+  <keyboard>
+    <keybind key="W-f">
+      <action name="Execute"><command>sonic-firefox --new-window about:blank</command></action>
+    </keybind>
+    <keybind key="W-S-Escape">
+      <action name="Execute"><command>systemctl poweroff</command></action>
+    </keybind>
+    <keybind key="W-d">
+      <action name="Execute"><command>sonic-display</command></action>
+    </keybind>
+    <keybind key="W-k">
+      <action name="Execute"><command>sonic-input</command></action>
+    </keybind>
+    <keybind key="W-q"><action name="Close"/></keybind>
+    <keybind key="W-t">
+      <action name="Execute"><command>tor-live-windows new</command></action>
+    </keybind>
+    <keybind key="C-A-t">
+      <action name="Execute"><command>xterm -T nemo -bg black -fg white -e bash -c 'fastfetch; exec bash'</command></action>
+    </keybind>
+    <keybind key="W-w">
+      <action name="Execute"><command>tor-live-rede</command></action>
+    </keybind>
+  </keyboard>
+</openbox_config>

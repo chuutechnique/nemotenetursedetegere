@@ -1,0 +1,169 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+printf '%s\n' '[privacy] sonic downloads, Discord, OpenVPN and Tailscale do not automatically use Tor. Remote services can retain records; a VPN is a separate connection.' >&2
+root="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sonic-apps"
+command_name=${0##*/}
+case "$command_name" in
+    openvpn)
+        if [[ ${1:-} == --config && $# == 2 ]]; then
+            exec /usr/local/bin/sonic install openvpn "$2"
+        fi
+        if (( $# != 0 )); then
+            echo 'usage: openvpn [--config profile.ovpn]' >&2
+            exit 2
+        fi
+        exec nmcli --ask connection up uuid "$(<"$root/openvpn-profile")" ;;
+    discord) exec /usr/local/bin/sonic-sandbox discord "$@" ;;
+    cowsay)
+        export COWPATH="$root/cowsay/usr/share/cowsay/cows"
+        exec /usr/local/bin/sonic-sandbox cowsay "$@" ;;
+    tailscale) exec "$root/tailscale/tailscale" --socket="$root/tailscale/tailscaled.sock" "$@" ;;
+    nmap|dig|whois|netcat|curl|jq|exiftool)
+        if [[ ! -L "$root/bin/$command_name" ]]; then
+            printf 'run sonic install %s first\n' "$command_name" >&2
+            exit 1
+        fi
+        exec /usr/local/bin/sonic-sandbox "$command_name" "$@" ;;
+esac
+
+if [[ ${1:-} == install && $# == 1 ]]; then
+    set -- install list
+fi
+if [[ ${1:-} != install || $# -lt 2 ]]; then
+    echo 'usage: sonic install <app>' >&2
+    exit 2
+fi
+app=$2
+shift 2
+case "$app" in
+    list)
+        if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+            printf '\033[94mdiscord\033[0m\n\033[93mopenvpn\033[0m\n\033[96mtailscale\033[0m\n\033[92mcowsay\033[0m\n\033[91mnmap\033[0m\n\033[94mdig\033[0m\n\033[93mwhois\033[0m\n\033[96mnetcat\033[0m\n\033[92mcurl\033[0m\n\033[95mjq\033[0m\n\033[91mexiftool\033[0m\n'
+        else
+            printf '%s\n' discord openvpn tailscale cowsay nmap dig whois netcat curl jq exiftool
+        fi
+        exit 0 ;;
+    nmap|dig|whois|netcat|curl|jq|exiftool)
+        binary=$app
+        [[ $app == netcat ]] && binary=nc.openbsd
+        if [[ ! -x /usr/bin/$binary ]]; then
+            echo "tool missing from this image — rebuild the current version" >&2
+            exit 1
+        fi
+        mkdir -p "$root/bin"
+        ln -sfn /usr/local/bin/sonic "$root/bin/$app"
+        printf '[%s] enabled for this RAM session; included in the verified ISO\n' "$app"
+        printf '[%s] use ~/Shared to exchange files with other applications\n' "$app"
+        if (( $# )); then exec "$root/bin/$app" "$@"; fi
+        exit 0 ;;
+    discord)
+        url=https://stable.dl2.discordapp.net/distro/app/stable/linux/x64/1.0.169/Discord.tar.gz
+        digest=21b47a62f83dbba99c128a379b6d901075b9eedb5e22a72dae87b7cd08088fa3 ;;
+    tailscale|tailscail)
+        app=tailscale
+        url=https://pkgs.tailscale.com/stable/tailscale_1.104.7_amd64.tgz
+        digest=e56693ff74a64f2591b7e819c280635a100aae1ddfb0ef058fcd052b7cd8d16c ;;
+    cowsay)
+        url=https://deb.debian.org/debian/pool/main/c/cowsay/cowsay_3.03+dfsg2-8_all.deb
+        digest=5b16f90ff97871aa0f442087abc1878940d00e310f74190ba854a097545204bf ;;
+    openvpn)
+        if (( $# != 1 )); then
+            echo 'usage: sonic install openvpn <profile.ovpn>' >&2
+            exit 2
+        fi
+        profile=$(realpath -e -- "$1")
+        echo "[openvpn] importing profile"
+        result=$(LC_ALL=C nmcli connection import --temporary type openvpn file "$profile")
+        if [[ ! $result =~ \(([[:xdigit:]-]{36})\) ]]; then
+            printf '%s\n' "$result" >&2
+            exit 1
+        fi
+        connection=${BASH_REMATCH[1]}
+        echo "[openvpn] starting connection"
+        nmcli --ask connection up uuid "$connection"
+        mkdir -p "$root/bin"
+        printf '%s\n' "$connection" > "$root/openvpn-profile"
+        ln -sfn /usr/local/bin/sonic "$root/bin/openvpn"
+        echo '[openvpn] ready — run openvpn to reconnect'
+        exit ;;
+    *)
+        echo 'app unavailable' >&2
+        exit 2 ;;
+esac
+
+mkdir -p "$root/bin"
+target="$root/$app"
+if [[ ! -d "$target" ]]; then
+    work=$(mktemp -d "$root/.install.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    mkdir "$work/app"
+    echo "[$app] downloading $url"
+    python3 - "$url" "$work/archive" <<'PY'
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=45) as response, open(sys.argv[2], "wb") as archive:
+    total = int(response.headers.get("Content-Length") or 0)
+    downloaded = 0
+    next_report = 0
+    while chunk := response.read(1024 * 1024):
+        archive.write(chunk)
+        downloaded += len(chunk)
+        if downloaded >= next_report or downloaded == total:
+            progress = f"{downloaded * 100 // total}%" if total else f"{downloaded} bytes"
+            print(f"downloaded {progress}", flush=True)
+            next_report = downloaded + max(total // 10, 1024 * 1024)
+PY
+    echo "[$app] verifying sha-256"
+    printf '%s  %s\n' "$digest" "$work/archive" | sha256sum --check --status || {
+        echo 'download checksum did not match' >&2
+        exit 1
+    }
+    echo "[$app] extracting files to ram"
+    if [[ $app == cowsay ]]; then
+        ar p "$work/archive" data.tar.xz | tar -xJ -C "$work/app" --no-same-owner
+    else
+        tar -xz -C "$work/app" --no-same-owner --strip-components=1 -f "$work/archive"
+    fi
+    mv -T --no-clobber "$work/app" "$target"
+    rm "$work/archive"
+else
+    echo "[$app] already installed for this session"
+fi
+ln -sfn /usr/local/bin/sonic "$root/bin/$app"
+echo "[$app] ready — run $app to use it again"
+
+case "$app" in
+    discord)
+        echo "[$app] launching — log: $target/session.log"
+        nohup "$root/bin/discord" "$@" >"$target/session.log" 2>&1 </dev/null &
+        ;;
+    cowsay)
+        if (( $# == 0 )); then set -- 'nemoTeneturSeDetegere'; fi
+        "$root/bin/cowsay" "$@"
+        ;;
+    tailscale)
+        socket="$target/tailscaled.sock"
+        exec 9>"$target/start.lock"
+        flock 9
+        if ! "$target/tailscale" --socket="$socket" status --json >/dev/null 2>&1; then
+            nohup "$target/tailscaled" --tun=userspace-networking --state=mem: \
+                --socket="$socket" --socks5-server=127.0.0.1:1055 \
+                >"$target/session.log" 2>&1 </dev/null 9>&- &
+            daemon=$!
+            for ((attempt=0; attempt<50; attempt++)); do
+                [[ -S "$socket" ]] && break
+                kill -0 "$daemon" 2>/dev/null || break
+                sleep .2
+            done
+            if [[ ! -S "$socket" ]]; then
+                kill "$daemon" 2>/dev/null || true
+                echo "tailscale could not start — see $target/session.log" >&2
+                exit 1
+            fi
+        fi
+        flock -u 9
+        "$target/tailscale" --socket="$socket" up "$@"
+        ;;
+esac

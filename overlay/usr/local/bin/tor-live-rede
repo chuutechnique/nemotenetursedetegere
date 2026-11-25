@@ -1,0 +1,152 @@
+#!/usr/bin/python3
+import fcntl
+import os
+import subprocess
+import sys
+import threading
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+
+def nm(*args):
+    return subprocess.run(
+        ["nmcli", *args], capture_output=True, text=True, check=True,
+        timeout=35, env={**os.environ, "LC_ALL": "C"},
+    ).stdout.strip()
+
+
+def has_route():
+    try:
+        return any(
+            subprocess.run(["ip", family, "route", "show", "default"],
+                           capture_output=True, text=True, timeout=3).stdout.strip()
+            for family in ("-4", "-6")
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+class Rede:
+    def __init__(self, lock):
+        self.lock = lock
+        self.window = Gtk.Window(title="network connection")
+        self.window.set_default_size(460, 220)
+        self.window.set_position(Gtk.WindowPosition.CENTER)
+        self.window.set_keep_above(True)
+        self.window.connect("destroy", Gtk.main_quit)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=18)
+        self.window.add(box)
+        self.route_status = Gtk.Label(xalign=0, wrap=True)
+        box.pack_start(self.route_status, False, False, 0)
+        self.status = Gtk.Label(xalign=0, wrap=True)
+        box.pack_start(self.status, False, False, 0)
+        self.networks = Gtk.ComboBoxText.new_with_entry()
+        self.networks.get_child().set_placeholder_text("select or enter a network name")
+        box.pack_start(self.networks, False, False, 0)
+        self.password = Gtk.Entry(placeholder_text="wi-fi password (if required)")
+        self.password.set_visibility(False)
+        box.pack_start(self.password, False, False, 0)
+        buttons = Gtk.Box(spacing=8)
+        box.pack_start(buttons, False, False, 0)
+        for title, callback in (
+            ("scan for wi-fi", self.scan), ("connect", self.connect),
+            ("close", lambda *_: self.window.destroy()),
+            ("shut down", lambda *_: subprocess.Popen(["systemctl", "poweroff"])),
+        ):
+            button = Gtk.Button(label=title)
+            button.connect("clicked", callback)
+            buttons.pack_start(button, False, False, 0)
+        self.controls = buttons
+        self.window.show_all()
+        self.update_route_status()
+        GLib.timeout_add_seconds(2, self.update_route_status)
+
+    def update_route_status(self):
+        message = "network connected" if has_route() else "no internet connection — connect to a wi-fi network"
+        self.route_status.set_text(message)
+        return True
+
+    def run(self, action, done, error):
+        self.controls.set_sensitive(False)
+
+        def finish(result, success):
+            self.controls.set_sensitive(True)
+            if success:
+                done(result)
+            else:
+                self.status.set_text(error)
+            return False
+
+        def worker():
+            try:
+                result = action()
+            except (OSError, subprocess.SubprocessError):
+                GLib.idle_add(finish, None, False)
+            else:
+                GLib.idle_add(finish, result, True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def scan(self, *_):
+        self.status.set_text("scanning for wi-fi networks")
+
+        def search():
+            nm("radio", "wifi", "on")
+            return nm("-t", "-e", "no", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes")
+
+        def display(result):
+            self.networks.remove_all()
+            for name in dict.fromkeys(result.splitlines()):
+                if name and name != "--":
+                    self.networks.append_text(name)
+            self.status.set_text("select a wi-fi network" if result else "no wi-fi networks found")
+
+        self.run(search, display, "wi-fi unavailable — check that the adapter is enabled")
+
+    def connect(self, *_):
+        ssid = self.networks.get_child().get_text()
+        if not ssid:
+            self.status.set_text("enter a wi-fi network name")
+            return
+        password = self.password.get_text()
+        self.password.set_text("")
+        args = ["--wait", "30", "device", "wifi", "connect", ssid, "private", "yes"]
+        if password:
+            args += ["password", password]
+        self.status.set_text("connecting to wi-fi")
+        self.run(lambda: nm(*args), lambda _: self.window.destroy(),
+                 "connection failed — check the password and try again")
+
+
+def main():
+    if sys.argv[1:] == ["--monitor"]:
+        previous = True
+        loop = GLib.MainLoop()
+
+        def check():
+            nonlocal previous
+            online = has_route()
+            if previous and not online:
+                subprocess.Popen([sys.argv[0]])
+            previous = online
+            return True
+
+        GLib.timeout_add_seconds(2, check)
+        loop.run()
+        return
+
+    with open(os.path.join(os.environ["XDG_RUNTIME_DIR"], "tor-live-rede.lock"), "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        dialog = Rede(lock)
+        dialog.scan()
+        Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
